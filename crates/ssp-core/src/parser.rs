@@ -106,7 +106,7 @@ impl AccountHeader {
             let padded = (size + TAR_BLOCK - 1) & !(TAR_BLOCK - 1);
 
             if is_accounts_entry(&header) {
-                let mut buf: Vec<u8> = recycle_rx.try_recv().unwrap_or_default();
+                let mut buf: Vec<u8> = recycle_rx.recv()?;
                 if buf.len() < size {
                     buf.resize(size, 0);
                 }
@@ -134,6 +134,7 @@ impl AccountHeader {
     }
 
     /// Stage 2: parse raw AppendVec buffer into filtered account headers + decoded batches.
+    /// Accumulates accounts in `chunk` and emits `RecordBatch`es of 65,536 accounts directly into `tx`.
     pub fn parse_accounts(
         buf: &[u8],
         filters: &ResolvedFilters,
@@ -141,10 +142,11 @@ impl AccountHeader {
         decoder_map: &HashMap<Pubkey, Vec<usize>>,
         decoded_tx: &Sender<(&'static str, RecordBatch)>,
         blocked_decoded: &AtomicU64,
-    ) -> Vec<AccountHeader> {
+        tx: &Sender<RecordBatch>,
+        blocked_tx: &AtomicU64,
+        chunk: &mut Vec<AccountHeader>,
+    ) -> anyhow::Result<()> {
         let mut offset = 0;
-        let estimated = (buf.len() / 256).clamp(128, 65536);
-        let mut batch = Vec::with_capacity(estimated);
 
         while offset + size_of::<AccountHeader>() <= buf.len() {
             let header = bytemuck::from_bytes::<AccountHeader>(
@@ -181,9 +183,19 @@ impl AccountHeader {
             if !filters.matches(header) {
                 continue;
             }
-            batch.push(*header);
+
+            chunk.push(*header);
+            if chunk.len() >= 65_536 {
+                let record_batch = crate::record_batch::build_record_batch(chunk)?;
+                chunk.clear();
+                if tx.is_full() {
+                    blocked_tx.fetch_add(1, Ordering::Relaxed);
+                }
+                tx.send(record_batch)?;
+            }
         }
 
-        batch
+        Ok(())
     }
 }
+

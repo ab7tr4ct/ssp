@@ -70,23 +70,29 @@ pub fn run(
         stats: stats.clone(),
     };
 
+    let num_cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let num_parsers = num_cpus.saturating_sub(4).max(4);
+
     // Stage 1: zstd → tar → raw buffers (buf, valid data size)
-    let (raw_tx, raw_rx) = channel::bounded::<(Vec<u8>, usize)>(128);
-    let (recycle_tx, recycle_rx) = channel::bounded(1024);
+    // Pre-allocated fixed buffer pool enforces strict bounded memory backpressure
+    let pool_size = num_parsers + 2;
+    let (raw_tx, raw_rx) = channel::bounded::<(Vec<u8>, usize)>(num_parsers);
+    let (recycle_tx, recycle_rx) = channel::bounded::<Vec<u8>>(pool_size);
+
+    for _ in 0..pool_size {
+        let _ = recycle_tx.send(Vec::new());
+    }
 
     let decompress =
         std::thread::spawn(move || AccountHeader::stream_raw(reader, raw_tx, recycle_rx));
 
     // Stage 2: parse raw buffers → account headers + decoded batches
-    let (tx, rx) = channel::bounded::<RecordBatch>(128);
+    let (tx, rx) = channel::bounded::<RecordBatch>(32);
     let (decoded_tx, decoded_rx) = channel::bounded::<(&'static str, RecordBatch)>(256);
 
     let filters = Arc::new(filters);
-
-    let num_cpus = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-    let num_parsers = num_cpus.saturating_sub(4).max(4);
 
     let parsers: Vec<_> = (0..num_parsers)
         .map(|_| {
@@ -109,32 +115,26 @@ pub fn run(
                     decoder_map.entry(dec.owner()).or_default().push(i);
                 }
 
-                let mut accumulated = Vec::with_capacity(16_384);
+                let mut chunk = Vec::with_capacity(65_536);
 
                 while let Ok((buf, size)) = raw_rx.recv() {
-                    let batch = AccountHeader::parse_accounts(
+                    AccountHeader::parse_accounts(
                         &buf[..size],
                         &filters,
                         &mut decoders,
                         &decoder_map,
                         &decoded_tx,
                         &stats.parser_blocked_decoded,
-                    );
-                    accumulated.extend(batch);
-                    if accumulated.len() >= 16_384 {
-                        let record_batch = record_batch::build_record_batch(&accumulated)?;
-                        accumulated.clear();
-                        if tx.is_full() {
-                            stats.parser_blocked_tx.fetch_add(1, Ordering::Relaxed);
-                        }
-                        tx.send(record_batch)?;
-                    }
+                        &tx,
+                        &stats.parser_blocked_tx,
+                        &mut chunk,
+                    )?;
                     let _ = recycle_tx.send(buf);
                 }
 
-                if !accumulated.is_empty() {
-                    let record_batch = record_batch::build_record_batch(&accumulated)?;
-                    tx.send(record_batch)?;
+                if !chunk.is_empty() {
+                    let record_batch = record_batch::build_record_batch(&chunk)?;
+                    let _ = tx.send(record_batch);
                 }
 
                 for dec in decoders.iter_mut() {
