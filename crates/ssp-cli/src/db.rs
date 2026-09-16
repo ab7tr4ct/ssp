@@ -24,9 +24,8 @@ impl DuckDB {
         let mut result = Vec::new();
         for (name, glob) in &candidates {
             if parquet_exists(name) {
-                self.connection.execute_batch(&format!(
-                    "CREATE VIEW {name} AS SELECT * FROM '{glob}'"
-                ))?;
+                self.connection
+                    .execute_batch(&format!("CREATE VIEW {name} AS SELECT * FROM '{glob}'"))?;
                 let count: i64 = self
                     .connection
                     .prepare(&format!("SELECT COUNT(*) FROM {name}"))?

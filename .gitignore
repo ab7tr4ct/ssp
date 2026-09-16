@@ -14,4 +14,4 @@ node-list-test.json
 .DS_Store
 
 docs/
-
+.tmp/

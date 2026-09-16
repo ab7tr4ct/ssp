@@ -74,13 +74,17 @@ pub fn is_accounts_entry(header: &[u8; TAR_BLOCK]) -> bool {
 
 impl AccountHeader {
     /// Stage 1: zstd → lightweight tar → send raw buffers.
+    ///
+    /// Buffers are sent as `(buf, size)` where `buf[..size]` is valid data.
+    /// Buffer length never shrinks, so the zero-fill cost of `resize` is paid
+    /// once per buffer high-water mark instead of on every reuse.
     pub fn stream_raw(
         reader: impl Read + Send,
-        raw_tx: Sender<Vec<u8>>,
+        raw_tx: Sender<(Vec<u8>, usize)>,
         recycle_rx: Receiver<Vec<u8>>,
     ) -> anyhow::Result<()> {
         let buffered = BufReader::with_capacity(4 * 1024 * 1024, reader);
-        let mut decoder = zstd::Decoder::new(buffered)?;
+        let mut decoder = zstd::Decoder::with_buffer(buffered)?;
         decoder.window_log_max(31)?;
 
         let mut header = [0u8; TAR_BLOCK];
@@ -102,13 +106,11 @@ impl AccountHeader {
             let padded = (size + TAR_BLOCK - 1) & !(TAR_BLOCK - 1);
 
             if is_accounts_entry(&header) {
-                let mut buf: Vec<u8> = recycle_rx
-                    .try_recv()
-                    .unwrap_or_else(|_| Vec::with_capacity(size));
-                // let mut buf = vec![0u8; size];
-
-                buf.resize(size, 0);
-                decoder.read_exact(&mut buf)?;
+                let mut buf: Vec<u8> = recycle_rx.try_recv().unwrap_or_default();
+                if buf.len() < size {
+                    buf.resize(size, 0);
+                }
+                decoder.read_exact(&mut buf[..size])?;
 
                 // Skip padding bytes to next 512 boundary
                 let padding = padded - size;
@@ -116,7 +118,7 @@ impl AccountHeader {
                     decoder.read_exact(&mut skip_buf[..padding])?;
                 }
 
-                raw_tx.send(buf)?;
+                raw_tx.send((buf, size))?;
             } else {
                 // Skip entry data efficiently
                 let mut remaining = padded;
@@ -160,7 +162,9 @@ impl AccountHeader {
             if let Some(indices) = decoder_map.get(&header.owner) {
                 for &idx in indices {
                     if decoders[idx].matches(&header.owner, header.data_len) {
-                        if let Some(batch) = decoders[idx].decode(header.pubkey, data, filters.include_spam) {
+                        if let Some(batch) =
+                            decoders[idx].decode(header.pubkey, data, filters.include_spam)
+                        {
                             if decoded_tx.is_full() {
                                 blocked_decoded.fetch_add(1, Ordering::Relaxed);
                             }

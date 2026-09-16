@@ -10,7 +10,10 @@ use tokio::sync::Semaphore;
 
 const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
 const FULL_SNAPSHOT_PATHS: &[&str] = &["/snapshot.tar.zst", "/snapshot.tar.bz2"];
-const INC_SNAPSHOT_PATHS: &[&str] = &["/incremental-snapshot.tar.zst", "/incremental-snapshot.tar.bz2"];
+const INC_SNAPSHOT_PATHS: &[&str] = &[
+    "/incremental-snapshot.tar.zst",
+    "/incremental-snapshot.tar.bz2",
+];
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONCURRENT_PROBE: usize = 256;
 const ROUGH_TEST_BYTES: usize = 512 * 1024;
@@ -210,9 +213,7 @@ async fn measure_download(client: &Client, url: &str, limit: usize) -> Option<(u
 }
 
 /// Phase 2a: Rough concurrent filter — rank all candidates by downloading a small sample.
-async fn rough_speed_filter(
-    candidates: Vec<SnapshotCandidate>,
-) -> Vec<SnapshotCandidate> {
+async fn rough_speed_filter(candidates: Vec<SnapshotCandidate>) -> Vec<SnapshotCandidate> {
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -251,9 +252,7 @@ async fn rough_speed_filter(
 }
 
 /// Phase 2b: Accurate sequential test — one at a time, large sample.
-async fn final_speed_test(
-    candidates: Vec<SnapshotCandidate>,
-) -> Vec<(SnapshotCandidate, f64)> {
+async fn final_speed_test(candidates: Vec<SnapshotCandidate>) -> Vec<(SnapshotCandidate, f64)> {
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -261,7 +260,9 @@ async fn final_speed_test(
 
     let mut results = Vec::new();
     for candidate in candidates {
-        if let Some((bytes, secs)) = measure_download(&client, &candidate.url, FINAL_TEST_BYTES).await {
+        if let Some((bytes, secs)) =
+            measure_download(&client, &candidate.url, FINAL_TEST_BYTES).await
+        {
             let mbps = (bytes as f64 / 1_048_576.0) / secs;
             results.push((candidate, mbps));
         }

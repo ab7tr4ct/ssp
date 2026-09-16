@@ -9,7 +9,7 @@ pub fn run(reader: impl Read + Send) {
 
     // Stage 1: zstd only — decompress to sink
     let start = Instant::now();
-    let mut decoder = zstd::Decoder::new(buffered).expect("zstd init failed");
+    let mut decoder = zstd::Decoder::with_buffer(buffered).expect("zstd init failed");
     decoder.window_log_max(31).unwrap();
     let bytes = io::copy(&mut decoder, &mut io::sink()).expect("zstd decompress failed");
     let elapsed = start.elapsed().as_secs_f64();
@@ -27,7 +27,7 @@ pub fn run_tar(reader: impl Read + Send) {
 
     // Stage 2: zstd + tar — iterate entries, read data, no parsing
     let start = Instant::now();
-    let mut decoder = zstd::Decoder::new(buffered).expect("zstd init failed");
+    let mut decoder = zstd::Decoder::with_buffer(buffered).expect("zstd init failed");
     decoder.window_log_max(31).unwrap();
 
     let mut header = [0u8; parser::TAR_BLOCK];
@@ -87,7 +87,7 @@ pub fn run_full(reader: impl Read + Send) {
 
     // Stage 3: zstd + tar + parse — full pipeline minus channel/writers
     let start = Instant::now();
-    let mut decoder = zstd::Decoder::new(buffered).expect("zstd init failed");
+    let mut decoder = zstd::Decoder::with_buffer(buffered).expect("zstd init failed");
     decoder.window_log_max(31).unwrap();
 
     let mut header = [0u8; parser::TAR_BLOCK];

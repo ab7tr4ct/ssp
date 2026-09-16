@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use crate::Pubkey;
+use std::collections::HashSet;
 
 static MINTS_TXT: &str = include_str!("known_mints.txt");
 

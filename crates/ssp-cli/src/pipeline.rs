@@ -71,8 +71,8 @@ pub fn run(
         stats: stats.clone(),
     };
 
-    // Stage 1: zstd → tar → raw buffers
-    let (raw_tx, raw_rx) = channel::bounded::<Vec<u8>>(128);
+    // Stage 1: zstd → tar → raw buffers (buf, valid data size)
+    let (raw_tx, raw_rx) = channel::bounded::<(Vec<u8>, usize)>(128);
     let (recycle_tx, recycle_rx) = channel::bounded(1024);
 
     let decompress =
@@ -105,9 +105,9 @@ pub fn run(
                     decoder_map.entry(dec.owner()).or_default().push(i);
                 }
 
-                while let Ok(buf) = raw_rx.recv() {
+                while let Ok((buf, size)) = raw_rx.recv() {
                     let batch = AccountHeader::parse_accounts(
-                        &buf,
+                        &buf[..size],
                         &filters,
                         &mut decoders,
                         &decoder_map,
@@ -187,9 +187,7 @@ pub fn run(
                 let mut writers: HashMap<&'static str, ArrowWriter<File>> = HashMap::new();
                 while let Ok((name, batch)) = {
                     if decoded_rx.is_empty() {
-                        stats
-                            .writer_starved_decoded
-                            .fetch_add(1, Ordering::Relaxed);
+                        stats.writer_starved_decoded.fetch_add(1, Ordering::Relaxed);
                     }
                     decoded_rx.recv()
                 } {

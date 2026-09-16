@@ -121,10 +121,7 @@ fn download_snapshot(incremental: bool, output_dir: &str) -> anyhow::Result<()> 
         .get(&source.url)
         .send()?;
 
-    let total = resp
-        .content_length()
-        .or(source.size)
-        .filter(|&s| s > 0);
+    let total = resp.content_length().or(source.size).filter(|&s| s > 0);
 
     let mut file = std::fs::File::create(&dest)?;
     let mut buf = vec![0u8; 1024 * 1024];

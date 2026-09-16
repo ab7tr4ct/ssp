@@ -1,10 +1,12 @@
 # SSP — Solana Snapshot Parser
 
-Run full Solana blockchain analytics on your laptop — no validator node, no third-party APIs, no cloud costs. SSP streams 100 GB+ snapshots directly from Solana mainnet RPC nodes, parses them in real-time at ~850 MB/s, and outputs to Parquet + DuckDB for instant SQL queries.
+Run full Solana blockchain analytics on your laptop — zero validator node, zero third-party APIs, and zero local snapshot persistence needed. SSP streams 100 GB+ snapshots directly from Solana mainnet RPC nodes, reconstructing full ledger states (1.05B+ records, ~466 GB) in ~2 min 10 sec on commodity hardware (Apple Silicon / M-series baseline).
+
+By pairing zero-copy binary parsing (`bytemuck`), ring buffer pooling, and bounded channel backpressure, SSP sustains ~840 MB/s compressed input throughput (~3.6 GB/s effective decompressed state throughput) and outputs directly to Parquet + DuckDB for instant SQL queries.
 
 ## What it does
 
-SSP discovers Solana RPC nodes, finds the fastest snapshot source, and streams the snapshot directly into a parsing pipeline — no 100GB+ local copy needed.
+SSP discovers Solana RPC nodes, finds the fastest snapshot source, and streams the snapshot directly into a parsing pipeline — no 100GB+ local snapshot persistence needed.
 
 ```
 RPC Discovery → HTTP Stream → zstd decompress → custom tar → AppendVec parse → Token decode → Parquet → DuckDB
@@ -85,21 +87,21 @@ crates/
 ### Key design decisions
 
 - **Custom tar parser** — replaced `tar` crate for performance and buffer control (~830 MB/s peak)
-- **bytemuck** for zero-copy binary parsing (like Zig's packed struct overlay)
-- **Buffer pooling** — recycling `Vec<u8>` between decompressor and parsers
-- **crossbeam-channel** bounded channels for backpressure
+- **Zero-copy binary parsing** — `bytemuck` overlays structured types directly onto raw bytes (like Zig's packed struct overlay)
+- **Ring buffer pooling** — recycling buffers (`Vec<u8>`) between decompressor and parsers to avoid allocation churn
+- **Bounded channel backpressure** — `crossbeam-channel` bounded queues provide backpressure across all pipeline stages
 - **Decoder trait** — pluggable token decoding (Mint, TokenAccount), writes to separate parquet files
-- Async (`tokio`) only for RPC discovery (probing 300+ nodes concurrently); everything else uses threads
-- Parser accepts `impl Read` — same code handles both local files and HTTP streams
+- **Async (`tokio`) only for RPC discovery** — probing 300+ nodes concurrently; parsing and I/O pipeline use dedicated OS threads
+- **Parser accepts `impl Read`** — identical pipeline logic handles both local files and network HTTP streams
 
 ## Benchmarks
 
-109 GB full snapshot (`snapshot-389758228.tar.zst`), 1.05B accounts, M1-series Mac:
+Reconstructing full ledger states from a 109 GB full snapshot (`snapshot-389758228.tar.zst`, 1.05B+ accounts, ~466 GB decompressed) in **~2 min 10 sec** on commodity hardware (Apple Silicon / M-series baseline):
 
-| Configuration                      | Throughput                          |
-| ---------------------------------- | ----------------------------------- |
-| Single-threaded (parse + write)    | ~123 MB/s                           |
-| Multi-threaded pipeline + filtered | ~840 MB/s sustained, ~870 MB/s peak |
+| Configuration                      | Compressed Throughput (`tar.zst`)   | Decompressed Throughput (Ledger)    | Speedup       |
+| ---------------------------------- | ----------------------------------- | ----------------------------------- | ------------- |
+| Single-threaded (parse + write)    | ~123 MB/s                           | ~530 MB/s                           | Baseline      |
+| Multi-threaded pipeline + filtered | ~840 MB/s sustained (~870 MB/s peak) | ~3.6 GB/s effective (~3.7 GB/s peak)| ~7x speedup   |
 
 Spam filter uses Jupiter's verified token list (4550 mints, embedded at compile time). Only verified mints and their token accounts are decoded. Use `--include-spam` to bypass.
 
