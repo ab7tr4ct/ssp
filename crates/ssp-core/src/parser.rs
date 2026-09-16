@@ -3,8 +3,8 @@ use {
     arrow::array::RecordBatch,
     bytemuck::{Pod, Zeroable},
     crossbeam::channel::{Receiver, Sender},
+    foldhash::HashMap,
     std::{
-        collections::HashMap,
         fmt,
         io::{BufReader, Read},
         sync::atomic::{AtomicU64, Ordering},
@@ -143,7 +143,8 @@ impl AccountHeader {
         blocked_decoded: &AtomicU64,
     ) -> Vec<AccountHeader> {
         let mut offset = 0;
-        let mut batch = Vec::new();
+        let estimated = (buf.len() / 256).clamp(128, 65536);
+        let mut batch = Vec::with_capacity(estimated);
 
         while offset + size_of::<AccountHeader>() <= buf.len() {
             let header = bytemuck::from_bytes::<AccountHeader>(
@@ -152,11 +153,13 @@ impl AccountHeader {
 
             offset += size_of::<AccountHeader>();
 
-            let data = &buf[offset..offset + header.data_len as usize];
+            let data_end = offset + header.data_len as usize;
+            if data_end > buf.len() {
+                break;
+            }
+            let data = &buf[offset..data_end];
 
-            offset += header.data_len as usize;
-
-            offset = (offset + 7) & !7;
+            offset = (data_end + 7) & !7;
 
             // O(1) lookup by owner — skips entirely for programs without decoders
             if let Some(indices) = decoder_map.get(&header.owner) {

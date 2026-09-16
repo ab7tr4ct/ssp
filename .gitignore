@@ -15,3 +15,5 @@ node-list-test.json
 
 docs/
 .tmp/
+*.tar.zst
+*.tar.bz2

@@ -2431,6 +2431,7 @@ dependencies = [
  "clap",
  "crossbeam",
  "duckdb",
+ "foldhash",
  "parquet",
  "reqwest 0.13.2",
  "serde",
@@ -2450,6 +2451,7 @@ dependencies = [
  "bytemuck",
  "crossbeam",
  "derive_more",
+ "foldhash",
  "zstd",
 ]
 

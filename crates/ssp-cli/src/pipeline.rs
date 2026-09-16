@@ -3,7 +3,7 @@ use crossbeam::channel;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use std::collections::HashMap;
+use foldhash::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
@@ -19,7 +19,6 @@ use ssp_core::parser::AccountHeader;
 use ssp_core::record_batch;
 
 const NUM_WRITERS: usize = 2;
-const NUM_PARSERS: usize = 4;
 const NUM_DECODED_WRITERS: usize = 2;
 
 pub struct PipelineStats {
@@ -79,12 +78,17 @@ pub fn run(
         std::thread::spawn(move || AccountHeader::stream_raw(reader, raw_tx, recycle_rx));
 
     // Stage 2: parse raw buffers → account headers + decoded batches
-    let (tx, rx) = channel::bounded::<Vec<AccountHeader>>(128);
+    let (tx, rx) = channel::bounded::<RecordBatch>(128);
     let (decoded_tx, decoded_rx) = channel::bounded::<(&'static str, RecordBatch)>(256);
 
     let filters = Arc::new(filters);
 
-    let parsers: Vec<_> = (0..NUM_PARSERS)
+    let num_cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let num_parsers = num_cpus.saturating_sub(4).max(4);
+
+    let parsers: Vec<_> = (0..num_parsers)
         .map(|_| {
             let raw_rx = raw_rx.clone();
             let tx = tx.clone();
@@ -100,10 +104,12 @@ pub fn run(
                     Box::new(TokenAccountDecoder::new(known_mints)),
                 ];
 
-                let mut decoder_map: HashMap<Pubkey, Vec<usize>> = HashMap::new();
+                let mut decoder_map: HashMap<Pubkey, Vec<usize>> = HashMap::default();
                 for (i, dec) in decoders.iter().enumerate() {
                     decoder_map.entry(dec.owner()).or_default().push(i);
                 }
+
+                let mut accumulated = Vec::with_capacity(16_384);
 
                 while let Ok((buf, size)) = raw_rx.recv() {
                     let batch = AccountHeader::parse_accounts(
@@ -114,13 +120,21 @@ pub fn run(
                         &decoded_tx,
                         &stats.parser_blocked_decoded,
                     );
-                    if !batch.is_empty() {
+                    accumulated.extend(batch);
+                    if accumulated.len() >= 16_384 {
+                        let record_batch = record_batch::build_record_batch(&accumulated)?;
+                        accumulated.clear();
                         if tx.is_full() {
                             stats.parser_blocked_tx.fetch_add(1, Ordering::Relaxed);
                         }
-                        tx.send(batch)?;
+                        tx.send(record_batch)?;
                     }
                     let _ = recycle_tx.send(buf);
+                }
+
+                if !accumulated.is_empty() {
+                    let record_batch = record_batch::build_record_batch(&accumulated)?;
+                    tx.send(record_batch)?;
                 }
 
                 for dec in decoders.iter_mut() {
@@ -139,7 +153,7 @@ pub fn run(
     drop(decoded_tx);
 
     // Stage 3: write parquet
-    let schema = Arc::new(record_batch::account_schema());
+    let schema = record_batch::account_schema_arc();
 
     let writers: Vec<_> = (0..NUM_WRITERS)
         .map(|i| {
@@ -164,11 +178,8 @@ pub fn run(
                 } {
                     stats
                         .rows_parsed
-                        .fetch_add(batch.len() as u64, Ordering::Relaxed);
-                    if !batch.is_empty() {
-                        let record_batch = record_batch::build_record_batch(&batch)?;
-                        writer.write(&record_batch)?;
-                    }
+                        .fetch_add(batch.num_rows() as u64, Ordering::Relaxed);
+                    writer.write(&batch)?;
                 }
                 writer.close()?;
                 Ok(())
@@ -184,7 +195,7 @@ pub fn run(
             let stats = stats.clone();
 
             std::thread::spawn(move || -> anyhow::Result<()> {
-                let mut writers: HashMap<&'static str, ArrowWriter<File>> = HashMap::new();
+                let mut writers: HashMap<&'static str, ArrowWriter<File>> = HashMap::default();
                 while let Ok((name, batch)) = {
                     if decoded_rx.is_empty() {
                         stats.writer_starved_decoded.fetch_add(1, Ordering::Relaxed);

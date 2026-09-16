@@ -2,7 +2,9 @@ use crate::parser::AccountHeader;
 use arrow::array::{ArrayRef, BinaryArray, BooleanArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+static SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| Arc::new(account_schema()));
 
 pub fn account_schema() -> Schema {
     Schema::new(vec![
@@ -13,6 +15,10 @@ pub fn account_schema() -> Schema {
         Field::new("executable", DataType::Boolean, false),
         Field::new("rent_epoch", DataType::UInt64, false),
     ])
+}
+
+pub fn account_schema_arc() -> Arc<Schema> {
+    SCHEMA.clone()
 }
 
 pub fn build_record_batch(headers: &[AccountHeader]) -> anyhow::Result<RecordBatch> {
@@ -28,18 +34,15 @@ pub fn build_record_batch(headers: &[AccountHeader]) -> anyhow::Result<RecordBat
     let data_lens: ArrayRef = Arc::new(UInt64Array::from_iter_values(
         headers.iter().map(|h| h.data_len),
     ));
-    let executables: ArrayRef = Arc::new(BooleanArray::from(
-        headers
-            .iter()
-            .map(|h| h.executable == 1)
-            .collect::<Vec<bool>>(),
+    let executables: ArrayRef = Arc::new(BooleanArray::from_iter(
+        headers.iter().map(|h| Some(h.executable == 1)),
     ));
     let rent_epochs: ArrayRef = Arc::new(UInt64Array::from_iter_values(
         headers.iter().map(|h| h.rent_epoch),
     ));
 
     let batch = RecordBatch::try_new(
-        Arc::new(account_schema()),
+        account_schema_arc(),
         vec![
             pubkeys,
             lamports,
@@ -52,3 +55,4 @@ pub fn build_record_batch(headers: &[AccountHeader]) -> anyhow::Result<RecordBat
 
     Ok(batch)
 }
+

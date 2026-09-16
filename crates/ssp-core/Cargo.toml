@@ -12,3 +12,4 @@ zstd = "0.13.3"
 crossbeam = "0.8.4"
 arrow = "56"
 derive_more = { version = "2.1.1", features = ["display"] }
+foldhash = "0.1"
