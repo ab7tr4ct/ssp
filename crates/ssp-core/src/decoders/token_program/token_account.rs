@@ -54,12 +54,12 @@ impl TokenAccountDecoder {
         self.state_b = UInt8Builder::with_capacity(BATCH_THRESHOLD);
         self.is_native_b = UInt64Builder::with_capacity(BATCH_THRESHOLD);
         self.delegated_amount_b = UInt64Builder::with_capacity(BATCH_THRESHOLD);
-        self.close_authority_b = BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
+        self.close_authority_b =
+            BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
 
         batch
     }
 }
-
 
 impl crate::decoders::Decoder for TokenAccountDecoder {
     fn name(&self) -> &'static str {
@@ -152,4 +152,3 @@ impl TokenAccountDecoder {
         }
     }
 }
-

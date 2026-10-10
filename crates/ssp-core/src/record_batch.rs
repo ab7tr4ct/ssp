@@ -55,4 +55,3 @@ pub fn build_record_batch(headers: &[AccountHeader]) -> anyhow::Result<RecordBat
 
     Ok(batch)
 }
-

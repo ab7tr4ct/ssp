@@ -1,9 +1,9 @@
 use arrow::array::RecordBatch;
 use crossbeam::channel;
+use foldhash::HashMap;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use foldhash::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;

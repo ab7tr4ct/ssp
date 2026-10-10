@@ -63,7 +63,8 @@ impl MintDecoder {
 
         self.pubkey_b = BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
         self.mint_authority_b = BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
-        self.freeze_authority_b = BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
+        self.freeze_authority_b =
+            BinaryBuilder::with_capacity(BATCH_THRESHOLD, BATCH_THRESHOLD * 32);
         self.supply_b = UInt64Builder::with_capacity(BATCH_THRESHOLD);
         self.decimals_b = UInt8Builder::with_capacity(BATCH_THRESHOLD);
         self.is_initialized_b = BooleanBuilder::with_capacity(BATCH_THRESHOLD);
