@@ -17,3 +17,5 @@ docs/
 .tmp/
 *.tar.zst
 *.tar.bz2
+
+CLAUDE.md

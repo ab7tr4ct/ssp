@@ -9,8 +9,6 @@ use ssp_core::Pubkey;
 use ssp_core::filters::ResolvedFilters;
 
 mod bench;
-#[allow(dead_code)]
-mod db;
 mod pipeline;
 mod rpc;
 

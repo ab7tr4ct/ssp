@@ -12,7 +12,6 @@ path = "src/main.rs"
 ssp-core = { path = "../ssp-core" }
 anyhow = "1.0.100"
 clap = { version = "4.5.57", features = ["derive"] }
-duckdb = { version = "1.4.4", features = ["bundled"] }
 crossbeam = "0.8.4"
 arrow = "56"
 parquet = "56"
